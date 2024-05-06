@@ -45,6 +45,22 @@ async fn main() {
     };
     info!("PC: {:?}", &proxy_config);
 
+    // todo: export to proxy_config
+    let (client, connection) = tokio_postgres::connect(
+        "host=127.0.0.1 user=postgres password=yourpassword dbname=sidepool",
+        tokio_postgres::NoTls,
+    )
+    .await
+    .unwrap();
+
+    // todo: send as a parameter to new Bridge
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+   
+
     let (tx_status, rx_status) = unbounded();
 
     // `tx_sv1_bridge` sender is used by `Downstream` to send a `DownstreamMessages` message to
@@ -163,6 +179,7 @@ async fn main() {
             extended_extranonce,
             target,
             up_id,
+            client,
         );
         proxy::Bridge::start(b.clone());
 

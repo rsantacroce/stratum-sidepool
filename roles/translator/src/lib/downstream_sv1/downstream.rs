@@ -495,7 +495,6 @@ impl IsServer<'static> for Downstream {
         debug!("Down: Handling mining.submit: {:?}", &request);
 
         // TODO: Check if receiving valid shares by adding diff field to Downstream
-
         if self.first_job_received {
             let to_send = SubmitShareWithChannelId {
                 channel_id: self.connection_id,

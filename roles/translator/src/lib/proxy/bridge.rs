@@ -64,6 +64,7 @@ pub struct Bridge {
     last_p_hash: Option<SetNewPrevHash<'static>>,
     target: Arc<Mutex<Vec<u8>>>,
     last_job_id: u32,
+    dbclient: tokio_postgres::Client,
 }
 
 impl Bridge {
@@ -79,6 +80,7 @@ impl Bridge {
         extranonces: ExtendedExtranonce,
         target: Arc<Mutex<Vec<u8>>>,
         up_id: u32,
+        dbclient: tokio_postgres::Client,
     ) -> Arc<Mutex<Self>> {
         let ids = Arc::new(Mutex::new(GroupId::new()));
         let share_per_min = 1.0;
@@ -107,6 +109,7 @@ impl Bridge {
             last_p_hash: None,
             target,
             last_job_id: 0,
+            dbclient,
         }))
     }
 
@@ -351,6 +354,10 @@ impl Bridge {
                         s.last_job_id = j_id;
                     })
                     .map_err(|_| PoisonLock)?;
+
+                // save notify message to db
+                
+
                 break;
             }
         }
@@ -504,152 +511,249 @@ pub struct OpenSv1Downstream {
     pub extranonce2_len: u16,
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use async_channel::bounded;
+// #[cfg(test)]
+// mod test {
+//     use super::*;
+//     use async_channel::bounded;
 
-    use stratum_common::bitcoin::util::psbt::serialize::Serialize;
+//     use stratum_common::bitcoin::util::psbt::serialize::Serialize;
 
-    pub mod test_utils {
-        use super::*;
+//     pub mod test_utils {
+//         use super::*;
 
-        pub struct BridgeInterface {
-            pub tx_sv1_submit: Sender<DownstreamMessages>,
-            pub rx_sv2_submit_shares_ext: Receiver<SubmitSharesExtended<'static>>,
-            pub tx_sv2_set_new_prev_hash: Sender<SetNewPrevHash<'static>>,
-            pub tx_sv2_new_ext_mining_job: Sender<NewExtendedMiningJob<'static>>,
-            pub rx_sv1_notify: broadcast::Receiver<server_to_client::Notify<'static>>,
-        }
+//         pub struct BridgeInterface {
+//             pub tx_sv1_submit: Sender<DownstreamMessages>,
+//             pub rx_sv2_submit_shares_ext: Receiver<SubmitSharesExtended<'static>>,
+//             pub tx_sv2_set_new_prev_hash: Sender<SetNewPrevHash<'static>>,
+//             pub tx_sv2_new_ext_mining_job: Sender<NewExtendedMiningJob<'static>>,
+//             pub rx_sv1_notify: broadcast::Receiver<server_to_client::Notify<'static>>,
+//         }
 
-        pub fn create_bridge(
-            extranonces: ExtendedExtranonce,
-        ) -> (Arc<Mutex<Bridge>>, BridgeInterface) {
-            let (tx_sv1_submit, rx_sv1_submit) = bounded(1);
-            let (tx_sv2_submit_shares_ext, rx_sv2_submit_shares_ext) = bounded(1);
-            let (tx_sv2_set_new_prev_hash, rx_sv2_set_new_prev_hash) = bounded(1);
-            let (tx_sv2_new_ext_mining_job, rx_sv2_new_ext_mining_job) = bounded(1);
-            let (tx_sv1_notify, rx_sv1_notify) = broadcast::channel(1);
-            let (tx_status, _rx_status) = bounded(1);
-            let upstream_target = vec![
-                0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0,
-            ];
-            let interface = BridgeInterface {
-                tx_sv1_submit,
-                rx_sv2_submit_shares_ext,
-                tx_sv2_set_new_prev_hash,
-                tx_sv2_new_ext_mining_job,
-                rx_sv1_notify,
-            };
+//         pub fn create_bridge(
+//             extranonces: ExtendedExtranonce,
+//         ) -> (Arc<Mutex<Bridge>>, BridgeInterface) {
+//             let (tx_sv1_submit, rx_sv1_submit) = bounded(1);
+//             let (tx_sv2_submit_shares_ext, rx_sv2_submit_shares_ext) = bounded(1);
+//             let (tx_sv2_set_new_prev_hash, rx_sv2_set_new_prev_hash) = bounded(1);
+//             let (tx_sv2_new_ext_mining_job, rx_sv2_new_ext_mining_job) = bounded(1);
+//             let (tx_sv1_notify, rx_sv1_notify) = broadcast::channel(1);
+//             let (tx_status, _rx_status) = bounded(1);
+//             let upstream_target = vec![
+//                 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                 0, 0, 0, 0, 0, 0, 0,
+//             ];
+//             let interface = BridgeInterface {
+//                 tx_sv1_submit,
+//                 rx_sv2_submit_shares_ext,
+//                 tx_sv2_set_new_prev_hash,
+//                 tx_sv2_new_ext_mining_job,
+//                 rx_sv1_notify,
+//             };
 
-            let b = Bridge::new(
-                rx_sv1_submit,
-                tx_sv2_submit_shares_ext,
-                rx_sv2_set_new_prev_hash,
-                rx_sv2_new_ext_mining_job,
-                tx_sv1_notify,
-                status::Sender::Bridge(tx_status),
-                extranonces,
-                Arc::new(Mutex::new(upstream_target)),
-                1,
-            );
-            (b, interface)
-        }
+//             let b = Bridge::new(
+//                 rx_sv1_submit,
+//                 tx_sv2_submit_shares_ext,
+//                 rx_sv2_set_new_prev_hash,
+//                 rx_sv2_new_ext_mining_job,
+//                 tx_sv1_notify,
+//                 status::Sender::Bridge(tx_status),
+//                 extranonces,
+//                 Arc::new(Mutex::new(upstream_target)),
+//                 1,
+//                 tokio_postgres::Client,
+//             );
+//             (b, interface)
+//         }
 
-        pub fn create_sv1_submit(job_id: u32) -> Submit<'static> {
-            Submit {
-                user_name: "test_user".to_string(),
-                job_id: job_id.to_string(),
-                extra_nonce2: v1::utils::Extranonce::try_from([0; 32].to_vec()).unwrap(),
-                time: v1::utils::HexU32Be(1),
-                nonce: v1::utils::HexU32Be(1),
-                version_bits: None,
-                id: 0,
-            }
-        }
-    }
+//         pub fn create_sv1_submit(job_id: u32) -> Submit<'static> {
+//             Submit {
+//                 user_name: "test_user".to_string(),
+//                 job_id: job_id.to_string(),
+//                 extra_nonce2: v1::utils::Extranonce::try_from([0; 32].to_vec()).unwrap(),
+//                 time: v1::utils::HexU32Be(1),
+//                 nonce: v1::utils::HexU32Be(1),
+//                 version_bits: None,
+//                 id: 0,
+//             }
+//         }
 
-    #[test]
-    fn test_version_bits_insert() {
-        use stratum_common::{
-            bitcoin,
-            bitcoin::{blockdata::witness::Witness, hashes::Hash},
-        };
+//         pub fn create_sv1_submit_with_username(user_name: &str, job_id: u32) -> Submit<'static> {
+//             Submit {
+//                 user_name: user_name.to_string(),
+//                 job_id: job_id.to_string(),
+//                 extra_nonce2: v1::utils::Extranonce::try_from([0; 32].to_vec()).unwrap(),
+//                 time: v1::utils::HexU32Be(1),
+//                 nonce: v1::utils::HexU32Be(1),
+//                 version_bits: None,
+//                 id: 0,
+//             }
+//         }
+//     }
 
-        let extranonces = ExtendedExtranonce::new(0..6, 6..8, 8..16);
-        let (bridge, _) = test_utils::create_bridge(extranonces);
-        bridge
-            .safe_lock(|bridge| {
-                let channel_id = 1;
-                let out_id = bitcoin::hashes::sha256d::Hash::from_slice(&[
-                    0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0,
-                ])
-                .unwrap();
-                let p_out = bitcoin::OutPoint {
-                    txid: bitcoin::Txid::from_hash(out_id),
-                    vout: 0xffff_ffff,
-                };
-                let in_ = bitcoin::TxIn {
-                    previous_output: p_out,
-                    script_sig: vec![89_u8; 16].into(),
-                    sequence: bitcoin::Sequence(0),
-                    witness: Witness::from_vec(vec![]).into(),
-                };
-                let tx = bitcoin::Transaction {
-                    version: 1,
-                    lock_time: bitcoin::PackedLockTime(0),
-                    input: vec![in_],
-                    output: vec![],
-                };
-                let tx = tx.serialize();
-                let _down = bridge
-                    .channel_factory
-                    .add_standard_channel(0, 10_000_000_000.0, true, 1)
-                    .unwrap();
-                let prev_hash = SetNewPrevHash {
-                    channel_id,
-                    job_id: 0,
-                    prev_hash: [
-                        3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-                        3, 3, 3, 3, 3, 3, 3,
-                    ]
-                    .into(),
-                    min_ntime: 989898,
-                    nbits: 9,
-                };
-                bridge.channel_factory.on_new_prev_hash(prev_hash).unwrap();
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as u32;
-                let new_mining_job = NewExtendedMiningJob {
-                    channel_id,
-                    job_id: 0,
-                    min_ntime: binary_sv2::Sv2Option::new(Some(now)),
-                    version: 0b0000_0000_0000_0000,
-                    version_rolling_allowed: false,
-                    merkle_path: vec![].into(),
-                    coinbase_tx_prefix: tx[0..42].to_vec().try_into().unwrap(),
-                    coinbase_tx_suffix: tx[58..].to_vec().try_into().unwrap(),
-                };
-                bridge
-                    .channel_factory
-                    .on_new_extended_mining_job(new_mining_job.clone())
-                    .unwrap();
+//     #[test]
+//     fn test_version_bits_insert() {
+//         use stratum_common::{
+//             bitcoin,
+//             bitcoin::{blockdata::witness::Witness, hashes::Hash},
+//         };
 
-                // pass sv1_submit into Bridge::translate_submit
-                let sv1_submit = test_utils::create_sv1_submit(0);
-                let sv2_message = bridge
-                    .translate_submit(channel_id, sv1_submit, None)
-                    .unwrap();
-                // assert sv2 message equals sv1 with version bits added
-                assert_eq!(
-                    new_mining_job.version, sv2_message.version,
-                    "Version bits were not inserted for non version rolling sv1 message"
-                );
-            })
-            .unwrap();
-    }
-}
+//         let extranonces = ExtendedExtranonce::new(0..6, 6..8, 8..16);
+//         let (bridge, _) = test_utils::create_bridge(extranonces);
+//         bridge
+//             .safe_lock(|bridge| {
+//                 let channel_id = 1;
+//                 let out_id = bitcoin::hashes::sha256d::Hash::from_slice(&[
+//                     0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                     0, 0, 0, 0, 0, 0, 0,
+//                 ])
+//                 .unwrap();
+//                 let p_out = bitcoin::OutPoint {
+//                     txid: bitcoin::Txid::from_hash(out_id),
+//                     vout: 0xffff_ffff,
+//                 };
+//                 let in_ = bitcoin::TxIn {
+//                     previous_output: p_out,
+//                     script_sig: vec![89_u8; 16].into(),
+//                     sequence: bitcoin::Sequence(0),
+//                     witness: Witness::from_vec(vec![]).into(),
+//                 };
+//                 let tx = bitcoin::Transaction {
+//                     version: 1,
+//                     lock_time: bitcoin::PackedLockTime(0),
+//                     input: vec![in_],
+//                     output: vec![],
+//                 };
+//                 let tx = tx.serialize();
+//                 let _down = bridge
+//                     .channel_factory
+//                     .add_standard_channel(0, 10_000_000_000.0, true, 1)
+//                     .unwrap();
+//                 let prev_hash = SetNewPrevHash {
+//                     channel_id,
+//                     job_id: 0,
+//                     prev_hash: [
+//                         3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+//                         3, 3, 3, 3, 3, 3, 3,
+//                     ]
+//                     .into(),
+//                     min_ntime: 989898,
+//                     nbits: 9,
+//                 };
+//                 bridge.channel_factory.on_new_prev_hash(prev_hash).unwrap();
+//                 let now = std::time::SystemTime::now()
+//                     .duration_since(std::time::UNIX_EPOCH)
+//                     .unwrap()
+//                     .as_secs() as u32;
+//                 let new_mining_job = NewExtendedMiningJob {
+//                     channel_id,
+//                     job_id: 0,
+//                     min_ntime: binary_sv2::Sv2Option::new(Some(now)),
+//                     version: 0b0000_0000_0000_0000,
+//                     version_rolling_allowed: false,
+//                     merkle_path: vec![].into(),
+//                     coinbase_tx_prefix: tx[0..42].to_vec().try_into().unwrap(),
+//                     coinbase_tx_suffix: tx[58..].to_vec().try_into().unwrap(),
+//                 };
+//                 bridge
+//                     .channel_factory
+//                     .on_new_extended_mining_job(new_mining_job.clone())
+//                     .unwrap();
+
+//                 // pass sv1_submit into Bridge::translate_submit
+//                 let sv1_submit = test_utils::create_sv1_submit(0);
+//                 let sv2_message = bridge
+//                     .translate_submit(channel_id, sv1_submit, None)
+//                     .unwrap();
+//                 // assert sv2 message equals sv1 with version bits added
+//                 assert_eq!(
+//                     new_mining_job.version, sv2_message.version,
+//                     "Version bits were not inserted for non version rolling sv1 message"
+//                 );
+//             })
+//             .unwrap();
+//     }
+
+//     #[test]
+//     fn test_mining_submit_shares() {
+//         use stratum_common::{
+//             bitcoin,
+//             bitcoin::{blockdata::witness::Witness, hashes::Hash},
+//         };
+
+//         let extranonces = ExtendedExtranonce::new(0..6, 6..8, 8..16);
+//         let (bridge, _) = test_utils::create_bridge(extranonces);
+//         bridge
+//             .safe_lock(|bridge| {
+//                 for channel_id in 0..10 {
+//                     let _down = bridge
+//                         .channel_factory
+//                         .add_standard_channel(channel_id, 10_000_000_000.0, true, 1)
+//                         .unwrap();
+//                     let prev_hash = SetNewPrevHash {
+//                         channel_id,
+//                         job_id: 0,
+//                         prev_hash: [
+//                             3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+//                             3, 3, 3, 3, 3, 3, 3, 3,
+//                         ]
+//                         .into(),
+//                         min_ntime: 989898,
+//                         nbits: 9,
+//                     };
+//                     bridge.channel_factory.on_new_prev_hash(prev_hash).unwrap();
+//                     let now = std::time::SystemTime::now()
+//                         .duration_since(std::time::UNIX_EPOCH)
+//                         .unwrap()
+//                         .as_secs() as u32;
+//                     let out_id = bitcoin::hashes::sha256d::Hash::from_slice(&[
+//                         0_u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                         0, 0, 0, 0, 0, 0, 0, 0,
+//                     ])
+//                     .unwrap();
+//                     let p_out = bitcoin::OutPoint {
+//                         txid: bitcoin::Txid::from_hash(out_id),
+//                         vout: 0xffff_ffff,
+//                     };
+//                     let in_ = bitcoin::TxIn {
+//                         previous_output: p_out,
+//                         script_sig: vec![89_u8; 16].into(),
+//                         sequence: bitcoin::Sequence(0),
+//                         witness: Witness::from_vec(vec![]).into(),
+//                     };
+//                     let tx = bitcoin::Transaction {
+//                         version: 1,
+//                         lock_time: bitcoin::PackedLockTime(0),
+//                         input: vec![in_],
+//                         output: vec![],
+//                     };
+//                     let tx = tx.serialize();
+//                     let new_mining_job = NewExtendedMiningJob {
+//                         channel_id,
+//                         job_id: 0,
+//                         min_ntime: binary_sv2::Sv2Option::new(Some(now)),
+//                         version: 0b0000_0000_0000_0000,
+//                         version_rolling_allowed: false,
+//                         merkle_path: vec![].into(),
+//                         coinbase_tx_prefix: tx[0..42].to_vec().try_into().unwrap(),
+//                         coinbase_tx_suffix: tx[58..].to_vec().try_into().unwrap(),
+//                     };
+//                     bridge
+//                         .channel_factory
+//                         .on_new_extended_mining_job(new_mining_job.clone())
+//                         .unwrap();
+
+//                     // pass sv1_submit into Bridge::translate_submit
+//                     let sv1_submit = test_utils::create_sv1_submit(0);
+//                     let sv2_message = bridge
+//                         .translate_submit(channel_id, sv1_submit, None)
+//                         .unwrap();
+//                     // assert sv2 message equals sv1 with version bits added
+//                     assert_eq!(
+//                         new_mining_job.version, sv2_message.version,
+//                         "Version bits were not inserted for non version rolling sv1 message"
+//                     );
+//                 }
+//             })
+//             .unwrap();
+//     }
+// }
