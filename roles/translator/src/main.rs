@@ -10,6 +10,7 @@ use roles_logic_sv2::utils::Mutex;
 
 use async_channel::{bounded, unbounded};
 use futures::{select, FutureExt};
+use sqlx::postgres::PgPoolOptions;
 use std::{
     net::{IpAddr, SocketAddr},
     str::FromStr,
@@ -46,20 +47,10 @@ async fn main() {
     info!("PC: {:?}", &proxy_config);
 
     // todo: export to proxy_config
-    let (client, connection) = tokio_postgres::connect(
-        "host=127.0.0.1 user=postgres password=yourpassword dbname=sidepool",
-        tokio_postgres::NoTls,
-    )
-    .await
-    .unwrap();
-
-    // todo: send as a parameter to new Bridge
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
-        }
-    });
-   
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect("postgres://postgres:password@127.0.0.1/sidepool")
+        .await.unwrap();
 
     let (tx_status, rx_status) = unbounded();
 
@@ -179,7 +170,7 @@ async fn main() {
             extended_extranonce,
             target,
             up_id,
-            client,
+            &pool,
         );
         proxy::Bridge::start(b.clone());
 
