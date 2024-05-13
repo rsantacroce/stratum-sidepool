@@ -110,7 +110,7 @@ impl Downstream {
         dbclient: &sqlx::PgPool,
     ) {
         let stream = std::sync::Arc::new(stream);
-        
+
         // Reads and writes from Downstream SV1 Mining Device Client
         let (socket_reader, socket_writer) = (stream.clone(), stream);
         let (tx_outgoing, receiver_outgoing) = bounded(10);
@@ -170,13 +170,11 @@ impl Downstream {
                         match res {
                             Some(Ok(incoming)) => {
                                 debug!("Receiving from Mining Device {}: {:?}", &host_, &incoming);
+                                let _ = super::super::utils::add_mining_event(&db_recv, &host_, &incoming).await.unwrap();
+
                                 let incoming: json_rpc::Message = handle_result!(tx_status_reader, serde_json::from_str(&incoming));
                                 // Handle what to do with message
                                 // if let json_rpc::Message
-
-                                // todo: create a proper function to persist the data
-                                let val = super::super::utils::add_to_database(&db_recv).await.unwrap();
-                                debug!("val: {:?}", val);
 
                                 // if message is Submit Shares update difficulty management
                                 if let v1::Message::StandardRequest(standard_req) = incoming.clone() {
@@ -230,9 +228,7 @@ impl Downstream {
                             }
                         };
 
-                        // todo: create a proper function to persist the data
-                        let val = super::super::utils::add_to_database(&db_send).await.unwrap();
-                        debug!("val: {:?}", val);
+                        let _ = super::super::utils::add_mining_event(&db_send, &host_.clone(), &to_send.clone()).await.unwrap();
 
                         debug!("Sending to Mining Device: {} - {:?}", &host_, &to_send);
                         let res = (&*socket_writer_clone)

@@ -50,7 +50,8 @@ async fn main() {
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect("postgres://postgres:password@127.0.0.1/sidepool")
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let (tx_status, rx_status) = unbounded();
 
