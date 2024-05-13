@@ -107,9 +107,10 @@ impl Downstream {
         host: String,
         difficulty_config: DownstreamDifficultyConfig,
         upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
+        dbclient: &sqlx::PgPool,
     ) {
         let stream = std::sync::Arc::new(stream);
-
+        
         // Reads and writes from Downstream SV1 Mining Device Client
         let (socket_reader, socket_writer) = (stream.clone(), stream);
         let (tx_outgoing, receiver_outgoing) = bounded(10);
@@ -143,6 +144,9 @@ impl Downstream {
         // we use the futures::select! macro to merge the receiving end of a task channels into a single loop within the task
         let (tx_shutdown, rx_shutdown): (Sender<bool>, Receiver<bool>) = async_channel::bounded(3);
 
+        let db_recv = std::sync::Arc::new(dbclient.clone());
+        let db_send = std::sync::Arc::new(dbclient.clone());
+
         let rx_shutdown_clone = rx_shutdown.clone();
         let tx_shutdown_clone = tx_shutdown.clone();
         let tx_status_reader = tx_status.clone();
@@ -169,6 +173,10 @@ impl Downstream {
                                 let incoming: json_rpc::Message = handle_result!(tx_status_reader, serde_json::from_str(&incoming));
                                 // Handle what to do with message
                                 // if let json_rpc::Message
+
+                                // todo: create a proper function to persist the data
+                                let val = super::super::utils::add_to_database(&db_recv).await.unwrap();
+                                debug!("val: {:?}", val);
 
                                 // if message is Submit Shares update difficulty management
                                 if let v1::Message::StandardRequest(standard_req) = incoming.clone() {
@@ -221,6 +229,11 @@ impl Downstream {
                                 break;
                             }
                         };
+
+                        // todo: create a proper function to persist the data
+                        let val = super::super::utils::add_to_database(&db_send).await.unwrap();
+                        debug!("val: {:?}", val);
+
                         debug!("Sending to Mining Device: {} - {:?}", &host_, &to_send);
                         let res = (&*socket_writer_clone)
                                     .write_all(to_send.as_bytes())
@@ -341,6 +354,7 @@ impl Downstream {
                 let open_sv1_downstream = bridge
                     .safe_lock(|s| s.on_new_sv1_connection(expected_hash_rate))
                     .unwrap();
+                let dbclient = bridge.safe_lock(|s| s.dbclient.clone()).unwrap();
 
                 let host = stream.peer_addr().unwrap().to_string();
                 match open_sv1_downstream {
@@ -358,6 +372,7 @@ impl Downstream {
                             host,
                             downstream_difficulty_config.clone(),
                             upstream_difficulty_config.clone(),
+                            &dbclient,
                         )
                         .await;
                     }

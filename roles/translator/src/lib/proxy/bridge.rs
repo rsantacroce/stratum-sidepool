@@ -175,11 +175,11 @@ impl Bridge {
             loop {
                 let msg = handle_result!(tx_status, rx_sv1_downstream.clone().recv().await);
 
-                let dbclient = self_.safe_lock(|s| s.dbclient.clone()).unwrap();
-                let val = super::super::utils::add_to_database(&dbclient)
-                    .await
-                    .unwrap();
-                debug!("val: {:?}", val);
+                // let dbclient = self_.safe_lock(|s| s.dbclient.clone()).unwrap();
+                // let val = super::super::utils::add_to_database(&dbclient)
+                //     .await
+                //     .unwrap();
+                // debug!("val: {:?}", val);
 
                 match msg {
                     DownstreamMessages::SubmitShares(share) => {
@@ -398,12 +398,12 @@ impl Bridge {
                 let sv2_set_new_prev_hash: SetNewPrevHash =
                     handle_result!(tx_status, rx_sv2_set_new_prev_hash.clone().recv().await);
 
-                let dbclient = self_.safe_lock(|s| s.dbclient.clone()).unwrap();
-                let val = super::super::utils::add_to_database(&dbclient)
-                    .await
-                    .unwrap();
-                debug!("val: {:?}", val);
-                
+                // let dbclient = self_.safe_lock(|s| s.dbclient.clone()).unwrap();
+                // let val = super::super::utils::add_to_database(&dbclient)
+                //     .await
+                //     .unwrap();
+                // debug!("val: {:?}", val);
+
                 debug!(
                     "handle_new_prev_hash job_id: {:?}",
                     &sv2_set_new_prev_hash.job_id
