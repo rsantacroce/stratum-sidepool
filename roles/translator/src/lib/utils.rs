@@ -30,7 +30,10 @@ pub async fn add_mining_event(
 ) -> Result<i32, sqlx::Error> {
 
     let map =  serde_json::from_slice::<std::collections::HashMap<String, serde_json::Value>>(message.as_bytes()).unwrap();
-    // let profile = map.get("profile").unwrap();
+    
+    if map.get("method").unwrap().as_str().unwrap() != "mining.authorize" {
+        return Ok(0);
+    }
 
     let row: (i32,) = sqlx::query_as(
         "INSERT INTO mining_events (host, payload, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) RETURNING id")
