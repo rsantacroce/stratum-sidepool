@@ -107,6 +107,7 @@ impl Downstream {
         host: String,
         difficulty_config: DownstreamDifficultyConfig,
         upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
+        dbclient: &sqlx::PgPool,
     ) {
         let stream = std::sync::Arc::new(stream);
 
@@ -143,6 +144,9 @@ impl Downstream {
         // we use the futures::select! macro to merge the receiving end of a task channels into a single loop within the task
         let (tx_shutdown, rx_shutdown): (Sender<bool>, Receiver<bool>) = async_channel::bounded(3);
 
+        let db_recv = std::sync::Arc::new(dbclient.clone());
+        let db_send = std::sync::Arc::new(dbclient.clone());
+
         let rx_shutdown_clone = rx_shutdown.clone();
         let tx_shutdown_clone = tx_shutdown.clone();
         let tx_status_reader = tx_status.clone();
@@ -166,6 +170,8 @@ impl Downstream {
                         match res {
                             Some(Ok(incoming)) => {
                                 debug!("Receiving from Mining Device {}: {:?}", &host_, &incoming);
+                                let _ = super::super::utils::add_mining_event(&db_recv, &host_, &incoming).await.unwrap();
+
                                 let incoming: json_rpc::Message = handle_result!(tx_status_reader, serde_json::from_str(&incoming));
                                 // Handle what to do with message
                                 // if let json_rpc::Message
@@ -221,6 +227,9 @@ impl Downstream {
                                 break;
                             }
                         };
+
+                        let _ = super::super::utils::add_mining_event(&db_send, &host_.clone(), &to_send.clone()).await.unwrap();
+
                         debug!("Sending to Mining Device: {} - {:?}", &host_, &to_send);
                         let res = (&*socket_writer_clone)
                                     .write_all(to_send.as_bytes())
@@ -341,6 +350,7 @@ impl Downstream {
                 let open_sv1_downstream = bridge
                     .safe_lock(|s| s.on_new_sv1_connection(expected_hash_rate))
                     .unwrap();
+                let dbclient = bridge.safe_lock(|s| s.dbclient.clone()).unwrap();
 
                 let host = stream.peer_addr().unwrap().to_string();
                 match open_sv1_downstream {
@@ -358,6 +368,7 @@ impl Downstream {
                             host,
                             downstream_difficulty_config.clone(),
                             upstream_difficulty_config.clone(),
+                            &dbclient,
                         )
                         .await;
                     }
@@ -495,7 +506,6 @@ impl IsServer<'static> for Downstream {
         debug!("Down: Handling mining.submit: {:?}", &request);
 
         // TODO: Check if receiving valid shares by adding diff field to Downstream
-
         if self.first_job_received {
             let to_send = SubmitShareWithChannelId {
                 channel_id: self.connection_id,

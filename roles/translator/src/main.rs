@@ -10,6 +10,7 @@ use roles_logic_sv2::utils::Mutex;
 
 use async_channel::{bounded, unbounded};
 use futures::{select, FutureExt};
+use sqlx::postgres::PgPoolOptions;
 use std::{
     net::{IpAddr, SocketAddr},
     str::FromStr,
@@ -44,6 +45,13 @@ async fn main() {
         Err(e) => panic!("failed to load config: {}", e),
     };
     info!("PC: {:?}", &proxy_config);
+
+    // todo: export to proxy_config
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect("postgres://postgres:password@127.0.0.1/sidepool")
+        .await
+        .unwrap();
 
     let (tx_status, rx_status) = unbounded();
 
@@ -163,6 +171,7 @@ async fn main() {
             extended_extranonce,
             target,
             up_id,
+            &pool,
         );
         proxy::Bridge::start(b.clone());
 

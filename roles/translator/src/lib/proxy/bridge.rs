@@ -8,8 +8,10 @@ use roles_logic_sv2::{
     parsers::Mining,
     utils::{GroupId, Mutex},
 };
+use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing_subscriber::field::debug;
 use v1::{client_to_server::Submit, server_to_client, utils::HexU32Be};
 
 use super::super::{
@@ -64,6 +66,7 @@ pub struct Bridge {
     last_p_hash: Option<SetNewPrevHash<'static>>,
     target: Arc<Mutex<Vec<u8>>>,
     last_job_id: u32,
+    pub dbclient: PgPool,
 }
 
 impl Bridge {
@@ -79,6 +82,7 @@ impl Bridge {
         extranonces: ExtendedExtranonce,
         target: Arc<Mutex<Vec<u8>>>,
         up_id: u32,
+        dbclient: &PgPool,
     ) -> Arc<Mutex<Self>> {
         let ids = Arc::new(Mutex::new(GroupId::new()));
         let share_per_min = 1.0;
@@ -107,6 +111,7 @@ impl Bridge {
             last_p_hash: None,
             target,
             last_job_id: 0,
+            dbclient: dbclient.clone(),
         }))
     }
 
@@ -125,6 +130,7 @@ impl Bridge {
                             self.target
                                 .safe_lock(|t| *t = success.target.to_vec())
                                 .map_err(|_e| PoisonLock)?;
+
                             return Ok(OpenSv1Downstream {
                                 channel_id: success.channel_id,
                                 last_notify: self.last_notify.clone(),
@@ -168,6 +174,12 @@ impl Bridge {
         task::spawn(async move {
             loop {
                 let msg = handle_result!(tx_status, rx_sv1_downstream.clone().recv().await);
+
+                // let dbclient = self_.safe_lock(|s| s.dbclient.clone()).unwrap();
+                // let val = super::super::utils::add_to_database(&dbclient)
+                //     .await
+                //     .unwrap();
+                // debug!("val: {:?}", val);
 
                 match msg {
                     DownstreamMessages::SubmitShares(share) => {
@@ -351,6 +363,9 @@ impl Bridge {
                         s.last_job_id = j_id;
                     })
                     .map_err(|_| PoisonLock)?;
+
+                // save notify message to db
+
                 break;
             }
         }
@@ -382,6 +397,13 @@ impl Bridge {
                 // Receive `SetNewPrevHash` from `Upstream`
                 let sv2_set_new_prev_hash: SetNewPrevHash =
                     handle_result!(tx_status, rx_sv2_set_new_prev_hash.clone().recv().await);
+
+                // let dbclient = self_.safe_lock(|s| s.dbclient.clone()).unwrap();
+                // let val = super::super::utils::add_to_database(&dbclient)
+                //     .await
+                //     .unwrap();
+                // debug!("val: {:?}", val);
+
                 debug!(
                     "handle_new_prev_hash job_id: {:?}",
                     &sv2_set_new_prev_hash.job_id
@@ -524,6 +546,7 @@ mod test {
 
         pub fn create_bridge(
             extranonces: ExtendedExtranonce,
+            pool: &PgPool,
         ) -> (Arc<Mutex<Bridge>>, BridgeInterface) {
             let (tx_sv1_submit, rx_sv1_submit) = bounded(1);
             let (tx_sv2_submit_shares_ext, rx_sv2_submit_shares_ext) = bounded(1);
@@ -553,6 +576,7 @@ mod test {
                 extranonces,
                 Arc::new(Mutex::new(upstream_target)),
                 1,
+                pool,
             );
             (b, interface)
         }
@@ -570,15 +594,15 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_version_bits_insert() {
+    #[sqlx::test]
+    async fn test_version_bits_insert(pool: PgPool) {
         use stratum_common::{
             bitcoin,
             bitcoin::{blockdata::witness::Witness, hashes::Hash},
         };
 
         let extranonces = ExtendedExtranonce::new(0..6, 6..8, 8..16);
-        let (bridge, _) = test_utils::create_bridge(extranonces);
+        let (bridge, _) = test_utils::create_bridge(extranonces, &pool);
         bridge
             .safe_lock(|bridge| {
                 let channel_id = 1;
